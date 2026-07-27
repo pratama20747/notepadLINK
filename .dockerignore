@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+
+# Docker
+docker-compose.yaml
+Dockerfile
+
+# Environment
+.env
+.env.example
+
+# Documentation
+*.md
+README.md
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+server
+*.exe
+*.test
+*.out
+
+# Dependencies (akan di-download ulang di container)
+vendor/
+
+# Database
+*.db
+*.sqlite
+
+# OS
+.DS_Store
+Thumbs.db
