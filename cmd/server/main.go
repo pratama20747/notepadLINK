@@ -79,7 +79,7 @@ func main() {
 	attachmentHandler := handler.NewAttachmentHandler(attachmentService, cfg.MaxVideoAttachSize)
 
 	// Buat HTTP server dari router
-	r := router.New(noteHandler, attachmentHandler)
+	r := router.New(noteHandler, attachmentHandler, cfg)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

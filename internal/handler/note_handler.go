@@ -78,7 +78,7 @@ func (h *NoteHandler) Create(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, createNoteResponse{
 		ID:       id,
-		ShareURL: "/n/" + id,
+		ShareURL: id,
 		Mode:     req.Mode,
 		Title:    title,
 	})

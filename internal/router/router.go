@@ -1,94 +1,137 @@
 package router
 
 import (
-	"os"
+	"context"
+	"net/http"
+	"time"
 
+	"notepad-sharelink/internal/config"
 	"notepad-sharelink/internal/handler"
 	"notepad-sharelink/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
-// New membangun router aplikasi. Tidak ada lagi konsep akun/login — semua
-// endpoint note & attachment bersifat publik, diakses lewat ID (share link)
-// dan, untuk mode private, password.
 func New(
 	noteHandler *handler.NoteHandler,
 	attachmentHandler *handler.AttachmentHandler,
+	cfg *config.Config,
 ) *gin.Engine {
 	r := gin.New()
 
 	r.Use(middleware.Logger())
 	r.Use(gin.Recovery())
-	r.Use(corsMiddleware())
+	r.Use(corsMiddleware(cfg.AllowedOrigins, cfg.IsProd))
+	r.Use(securityHeaders())
+	r.Use(timeoutMiddleware(cfg.RequestTimeout))
 
 	r.GET("/health", healthCheck)
 
-	// Rate limiter untuk endpoint yang rawan brute-force / abuse.
-	createLimiter, _ := middleware.NewRateLimiter("5-M")
-	unlockLimiter, _ := middleware.NewRateLimiter("20-M")
+	// ============================================
+	// RATE LIMITER - langsung pake NewRateLimiter
+	// ============================================
+	createLimiter, err := middleware.NewRateLimiter("5-M")
+	if err != nil {
+		panic("gagal init rate limiter create: " + err.Error())
+	}
+
+	unlockLimiter, err := middleware.NewRateLimiter("20-M")
+	if err != nil {
+		panic("gagal init rate limiter unlock: " + err.Error())
+	}
 
 	notes := r.Group("/api/notes")
 	{
 		notes.GET("/:id", noteHandler.Get)
-		notes.POST("/:id/unlock", unlockLimiter, noteHandler.Unlock)
-		notes.POST("", createLimiter, noteHandler.Create)
+		notes.POST("", createLimiter, noteHandler.Create) // ← pake limiter
 		notes.PUT("/:id", noteHandler.Update)
 		notes.DELETE("/:id", noteHandler.Delete)
+		notes.POST("/:id/unlock", unlockLimiter, noteHandler.Unlock) // ← pake limiter
+	}
 
-		// Attachments
-		notes.POST("/:id/attachments/presign", attachmentHandler.PresignUpload)
-		notes.POST("/:id/attachments/confirm", attachmentHandler.ConfirmUpload)
-		notes.POST("/:id/attachments/private", attachmentHandler.UploadPrivate)
-		notes.POST("/attachments/:attachmentId/download", attachmentHandler.DownloadPrivate)
-		notes.DELETE("/attachments/:attachmentId", attachmentHandler.Delete)
+	attachments := r.Group("/api/notes/:id/attachments")
+	{
+		attachments.POST("/presign", attachmentHandler.PresignUpload)
+		attachments.POST("/confirm", attachmentHandler.ConfirmUpload)
+		attachments.POST("/private", attachmentHandler.UploadPrivate)
+	}
+
+	downloads := r.Group("/api/attachments")
+	{
+		downloads.POST("/:attachmentId/download", attachmentHandler.DownloadPrivate)
+		downloads.DELETE("/:attachmentId", attachmentHandler.Delete)
 	}
 
 	r.NoRoute(func(c *gin.Context) {
-		c.JSON(404, gin.H{"error": "Not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 	})
 
 	return r
 }
 
-// CORS middleware
-func corsMiddleware() gin.HandlerFunc {
+// ============================================
+// CORS
+// ============================================
+func corsMiddleware(allowedOrigins []string, isProd bool) gin.HandlerFunc {
+	allowedMap := make(map[string]bool)
+	for _, origin := range allowedOrigins {
+		allowedMap[origin] = true
+	}
+
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 
-		if os.Getenv("APP_ENV") == "development" {
-			if origin != "" {
-				c.Header("Access-Control-Allow-Origin", origin)
-				c.Header("Access-Control-Allow-Credentials", "true")
-			}
-			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			if c.Request.Method == "OPTIONS" {
-				c.AbortWithStatus(204)
-				return
-			}
-			c.Next()
-			return
-		}
-
-		// PRODUCTION: Allowlist
-		allowed := map[string]bool{
-			"https://pratama20747.github.io": true,
-			"https://binery.my.id":           true,
-		}
-		if allowed[origin] {
+		if isOriginAllowed(origin, allowedMap, isProd) {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Credentials", "true")
 		}
+
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
 		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
+			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
 		c.Next()
 	}
 }
+
+func isOriginAllowed(origin string, allowedMap map[string]bool, isProd bool) bool {
+	if !isProd {
+		return origin != ""
+	}
+	return allowedMap[origin]
+}
+
+// ============================================
+// Security Headers
+// ============================================
+func securityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("X-XSS-Protection", "1; mode=block")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Next()
+	}
+}
+
+// ============================================
+// Timeout Middleware
+// ============================================
+func timeoutMiddleware(timeout time.Duration) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	}
+}
+
+// ============================================
+// Health Check
+// ============================================
 func healthCheck(c *gin.Context) {
-	c.JSON(200, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

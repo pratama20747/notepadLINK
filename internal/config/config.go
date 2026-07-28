@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -12,10 +13,11 @@ import (
 
 // Config menyimpan seluruh konfigurasi yang dibutuhkan aplikasi.
 type Config struct {
-	DatabaseURL string
-	Port        string
-	IsProd      bool
-
+	DatabaseURL    string
+	Port           string
+	IsProd         bool
+	AllowedOrigins []string
+	RequestTimeout time.Duration
 	// Cloudflare R2
 	R2AccountID       string
 	R2AccessKeyID     string
@@ -45,6 +47,11 @@ func Load() (*Config, error) {
 
 	isProd := os.Getenv("APP_ENV") == "production"
 
+	allowedOrigins := []string{}
+	if origins := os.Getenv("ALLOWED_ORIGINS"); origins != "" {
+		allowedOrigins = strings.Split(origins, ",")
+	}
+
 	// --- R2 ---
 	r2AccountID := os.Getenv("R2_ACCOUNT_ID")
 	r2AccessKeyID := os.Getenv("R2_ACCESS_KEY_ID")
@@ -59,10 +66,11 @@ func Load() (*Config, error) {
 	maxAttachments := envInt("MAX_ATTACHMENTS_PER_NOTE", 10)
 
 	return &Config{
-		DatabaseURL: dbURL,
-		Port:        port,
-		IsProd:      isProd,
-
+		DatabaseURL:       dbURL,
+		Port:              port,
+		IsProd:            isProd,
+		AllowedOrigins:    allowedOrigins,
+		RequestTimeout:    time.Second * 30,
 		R2AccountID:       r2AccountID,
 		R2AccessKeyID:     r2AccessKeyID,
 		R2SecretAccessKey: r2SecretAccessKey,
