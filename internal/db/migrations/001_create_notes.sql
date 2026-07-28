@@ -36,18 +36,20 @@ COMMENT ON COLUMN notes.salt IS '16 byte random salt for private mode, empty for
 -- TABEL note_attachments
 -- ============================================================
 CREATE TABLE IF NOT EXISTS note_attachments (
-    id           VARCHAR(21) PRIMARY KEY,
-    note_id      VARCHAR(21) NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-    r2_key       TEXT NOT NULL,
-    url          TEXT NOT NULL,
-    content_type VARCHAR(50) NOT NULL,
-    file_size    BIGINT NOT NULL,
-    kind         VARCHAR(10) NOT NULL CHECK (kind IN ('image', 'video')),
-    encrypted    BOOLEAN NOT NULL DEFAULT false,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    note_id          VARCHAR(21) NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    attachment_index INTEGER NOT NULL,           -- Index per note (1, 2, 3, ...)
+    r2_key           TEXT NOT NULL,
+    url              TEXT NOT NULL,
+    content_type     VARCHAR(50) NOT NULL,
+    file_size        BIGINT NOT NULL,
+    kind             VARCHAR(10) NOT NULL CHECK (kind IN ('image', 'video')),
+    encrypted        BOOLEAN NOT NULL DEFAULT false,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (note_id, attachment_index)      -- Composite PK
 );
 
 CREATE INDEX IF NOT EXISTS idx_note_attachments_note_id ON note_attachments (note_id);
 
+COMMENT ON COLUMN note_attachments.attachment_index IS 'Index sequential per note, dimulai dari 1';
 COMMENT ON COLUMN note_attachments.encrypted IS 'true jika note pemiliknya mode private — content_type & file_size di sini merujuk ke file ASLI (sebelum dienkripsi), bukan blob terenkripsi di R2';
 COMMENT ON COLUMN note_attachments.r2_key IS 'key object di R2. Untuk attachment private, isinya adalah nonce||ciphertext AES-GCM (application/octet-stream)';

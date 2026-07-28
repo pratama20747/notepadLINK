@@ -29,8 +29,9 @@ type Note struct {
 }
 
 type NoteAttachment struct {
-	ID     string `json:"id"`
 	NoteID string `json:"note_id"`
+	// Index sequential per note, dimulai dari 1
+	AttachmentIndex int32 `json:"attachment_index"`
 	// key object di R2. Untuk attachment private, isinya adalah nonce||ciphertext AES-GCM (application/octet-stream)
 	R2Key       string `json:"r2_key"`
 	Url         string `json:"url"`

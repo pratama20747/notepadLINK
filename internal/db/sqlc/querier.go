@@ -13,10 +13,11 @@ type Querier interface {
 	CountNotes(ctx context.Context) (int64, error)
 	CreateAttachment(ctx context.Context, arg CreateAttachmentParams) (NoteAttachment, error)
 	CreateNote(ctx context.Context, arg CreateNoteParams) (Note, error)
-	DeleteAttachment(ctx context.Context, id string) (int64, error)
+	DeleteAttachment(ctx context.Context, arg DeleteAttachmentParams) (int64, error)
 	DeleteAttachmentsByNote(ctx context.Context, noteID string) error
 	DeleteNote(ctx context.Context, id string) (int64, error)
-	GetAttachmentByID(ctx context.Context, id string) (NoteAttachment, error)
+	GetAttachmentByNoteAndIndex(ctx context.Context, arg GetAttachmentByNoteAndIndexParams) (NoteAttachment, error)
+	GetNextAttachmentIndex(ctx context.Context, noteID string) (int32, error)
 	GetNextCounter(ctx context.Context) (int64, error)
 	GetNote(ctx context.Context, id string) (Note, error)
 	ListAttachmentsByNote(ctx context.Context, noteID string) ([]NoteAttachment, error)

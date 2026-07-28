@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -103,7 +104,7 @@ func (h *AttachmentHandler) UploadPrivate(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"id": att.ID, "kind": att.Kind, "content_type": att.ContentType,
+		"attachment_index": att.AttachmentIndex, "kind": att.Kind, "content_type": att.ContentType,
 		"file_size": att.FileSize, "created_at": att.CreatedAt,
 	})
 }
@@ -112,17 +113,24 @@ type downloadPrivateRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
-// DownloadPrivate menangani POST /api/notes/attachments/:attachmentId/download.
+// DownloadPrivate menangani POST /api/notes/:id/attachments/:index/download.
 // PUBLIK (seperti Unlock note) — mengembalikan bytes file asli setelah didekripsi.
 func (h *AttachmentHandler) DownloadPrivate(c *gin.Context) {
-	attachmentID := c.Param("attachmentId")
+	noteID := c.Param("id")
+	indexStr := c.Param("index")
+	index, err := strconv.ParseInt(indexStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid attachment index"})
+		return
+	}
+
 	var req downloadPrivateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	data, contentType, err := h.svc.DownloadPrivate(c.Request.Context(), attachmentID, req.Password)
+	data, contentType, err := h.svc.DownloadPrivate(c.Request.Context(), noteID, int32(index), req.Password)
 	if err != nil {
 		respondAttachmentError(c, err)
 		return
@@ -132,9 +140,15 @@ func (h *AttachmentHandler) DownloadPrivate(c *gin.Context) {
 }
 
 func (h *AttachmentHandler) Delete(c *gin.Context) {
-	attachmentID := c.Param("attachmentId")
+	noteID := c.Param("id")
+	indexStr := c.Param("index")
+	index, err := strconv.ParseInt(indexStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid attachment index"})
+		return
+	}
 
-	if err := h.svc.Delete(c.Request.Context(), attachmentID); err != nil {
+	if err := h.svc.Delete(c.Request.Context(), noteID, int32(index)); err != nil {
 		respondAttachmentError(c, err)
 		return
 	}

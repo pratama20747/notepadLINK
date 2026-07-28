@@ -54,12 +54,8 @@ func New(
 		attachments.POST("/presign", attachmentHandler.PresignUpload)
 		attachments.POST("/confirm", attachmentHandler.ConfirmUpload)
 		attachments.POST("/private", attachmentHandler.UploadPrivate)
-	}
-
-	downloads := r.Group("/api/attachments")
-	{
-		downloads.POST("/:attachmentId/download", attachmentHandler.DownloadPrivate)
-		downloads.DELETE("/:attachmentId", attachmentHandler.Delete)
+		attachments.POST("/:index/download", attachmentHandler.DownloadPrivate)
+		attachments.DELETE("/:index", attachmentHandler.Delete)
 	}
 
 	r.NoRoute(func(c *gin.Context) {

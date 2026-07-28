@@ -13,7 +13,6 @@ import (
 	"notepad-sharelink/internal/cryptoutil"
 	"notepad-sharelink/internal/db/sqlc"
 	"notepad-sharelink/internal/fileutil"
-	"notepad-sharelink/internal/idgen"
 	"notepad-sharelink/internal/storage"
 
 	"github.com/jackc/pgx/v5"
@@ -55,13 +54,9 @@ func (s *AttachmentService) allowedTypesAndLimit(kind string) (map[string]bool, 
 	}
 }
 
-// nextID mengambil counter global berikutnya dan meng-encode-nya jadi ID slug.
-func (s *AttachmentService) nextID(ctx context.Context) (string, error) {
-	counter, err := s.q.GetNextCounter(ctx)
-	if err != nil {
-		return "", err
-	}
-	return idgen.Encode(counter), nil
+// nextAttachmentIndex mengambil index attachment berikutnya untuk note tertentu.
+func (s *AttachmentService) nextAttachmentIndex(ctx context.Context, noteID string) (int32, error) {
+	return s.q.GetNextAttachmentIndex(ctx, noteID)
 }
 
 // checkCapacity memastikan note ada dan kuota attachment belum penuh.
@@ -157,15 +152,20 @@ func (s *AttachmentService) ConfirmUpload(ctx context.Context, noteID, key, kind
 		return sqlc.NoteAttachment{}, err
 	}
 
-	id, err := s.nextID(ctx)
+	index, err := s.nextAttachmentIndex(ctx, noteID)
 	if err != nil {
 		return sqlc.NoteAttachment{}, err
 	}
 
 	return s.q.CreateAttachment(ctx, sqlc.CreateAttachmentParams{
-		ID: id, NoteID: noteID, R2Key: key,
-		Url: s.storage.PublicURL(key), ContentType: actualType,
-		FileSize: size, Kind: kind, Encrypted: false,
+		NoteID:          noteID,
+		AttachmentIndex: index,
+		R2Key:           key,
+		Url:             s.storage.PublicURL(key),
+		ContentType:     actualType,
+		FileSize:        size,
+		Kind:            kind,
+		Encrypted:       false,
 	})
 }
 
@@ -224,23 +224,31 @@ func (s *AttachmentService) UploadPrivate(ctx context.Context, noteID, password,
 		return sqlc.NoteAttachment{}, err
 	}
 
-	id, err := s.nextID(ctx)
+	index, err := s.nextAttachmentIndex(ctx, noteID)
 	if err != nil {
 		return sqlc.NoteAttachment{}, err
 	}
 
 	return s.q.CreateAttachment(ctx, sqlc.CreateAttachmentParams{
-		ID: id, NoteID: noteID, R2Key: r2Key, Url: url,
-		ContentType: actualType, FileSize: int64(len(fileBytes)),
-		Kind: kind, Encrypted: true,
+		NoteID:          noteID,
+		AttachmentIndex: index,
+		R2Key:           r2Key,
+		Url:             url,
+		ContentType:     actualType,
+		FileSize:        int64(len(fileBytes)),
+		Kind:            kind,
+		Encrypted:       true,
 	})
 }
 
 // DownloadPrivate mengambil attachment terenkripsi dari R2 lalu mendekripsi
 // dengan password. Endpoint PUBLIK (mengikuti pola Unlock note) — siapapun
 // yang tahu password note bisa download.
-func (s *AttachmentService) DownloadPrivate(ctx context.Context, attachmentID, password string) (data []byte, contentType string, err error) {
-	att, err := s.q.GetAttachmentByID(ctx, attachmentID)
+func (s *AttachmentService) DownloadPrivate(ctx context.Context, noteID string, attachmentIndex int32, password string) (data []byte, contentType string, err error) {
+	att, err := s.q.GetAttachmentByNoteAndIndex(ctx, sqlc.GetAttachmentByNoteAndIndexParams{
+		NoteID:          noteID,
+		AttachmentIndex: attachmentIndex,
+	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, "", ErrNotFound
@@ -256,21 +264,25 @@ func (s *AttachmentService) DownloadPrivate(ctx context.Context, attachmentID, p
 		return nil, "", err
 	}
 
-	key := cryptoutil.DeriveKey(password, n.Salt)
-	encrypted, err := s.storage.GetObject(ctx, att.R2Key)
+	encKey := cryptoutil.DeriveKey(password, n.Salt)
+	encryptedData, err := s.storage.GetObject(ctx, att.R2Key)
 	if err != nil {
 		return nil, "", err
 	}
 
-	plain, err := cryptoutil.Decrypt(encrypted, key)
+	plain, err := cryptoutil.Decrypt(encryptedData, encKey)
 	if err != nil {
 		return nil, "", ErrWrongPassword
 	}
 
 	return plain, att.ContentType, nil
 }
-func (s *AttachmentService) Delete(ctx context.Context, attachmentID string) error {
-	att, err := s.q.GetAttachmentByID(ctx, attachmentID)
+
+func (s *AttachmentService) Delete(ctx context.Context, noteID string, attachmentIndex int32) error {
+	att, err := s.q.GetAttachmentByNoteAndIndex(ctx, sqlc.GetAttachmentByNoteAndIndexParams{
+		NoteID:          noteID,
+		AttachmentIndex: attachmentIndex,
+	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -279,7 +291,10 @@ func (s *AttachmentService) Delete(ctx context.Context, attachmentID string) err
 	}
 
 	_ = s.storage.DeleteObject(ctx, att.R2Key) // best-effort
-	rows, err := s.q.DeleteAttachment(ctx, attachmentID)
+	rows, err := s.q.DeleteAttachment(ctx, sqlc.DeleteAttachmentParams{
+		NoteID:          noteID,
+		AttachmentIndex: attachmentIndex,
+	})
 	if err != nil {
 		return err
 	}

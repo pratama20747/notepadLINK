@@ -21,26 +21,26 @@ func (q *Queries) CountAttachmentsByNote(ctx context.Context, noteID string) (in
 }
 
 const createAttachment = `-- name: CreateAttachment :one
-INSERT INTO note_attachments (id, note_id, r2_key, url, content_type, file_size, kind, encrypted)
+INSERT INTO note_attachments (note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, note_id, r2_key, url, content_type, file_size, kind, encrypted, created_at
+RETURNING note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted, created_at
 `
 
 type CreateAttachmentParams struct {
-	ID          string `json:"id"`
-	NoteID      string `json:"note_id"`
-	R2Key       string `json:"r2_key"`
-	Url         string `json:"url"`
-	ContentType string `json:"content_type"`
-	FileSize    int64  `json:"file_size"`
-	Kind        string `json:"kind"`
-	Encrypted   bool   `json:"encrypted"`
+	NoteID          string `json:"note_id"`
+	AttachmentIndex int32  `json:"attachment_index"`
+	R2Key           string `json:"r2_key"`
+	Url             string `json:"url"`
+	ContentType     string `json:"content_type"`
+	FileSize        int64  `json:"file_size"`
+	Kind            string `json:"kind"`
+	Encrypted       bool   `json:"encrypted"`
 }
 
 func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentParams) (NoteAttachment, error) {
 	row := q.db.QueryRow(ctx, createAttachment,
-		arg.ID,
 		arg.NoteID,
+		arg.AttachmentIndex,
 		arg.R2Key,
 		arg.Url,
 		arg.ContentType,
@@ -50,8 +50,8 @@ func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentPara
 	)
 	var i NoteAttachment
 	err := row.Scan(
-		&i.ID,
 		&i.NoteID,
+		&i.AttachmentIndex,
 		&i.R2Key,
 		&i.Url,
 		&i.ContentType,
@@ -64,11 +64,17 @@ func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentPara
 }
 
 const deleteAttachment = `-- name: DeleteAttachment :execrows
-DELETE FROM note_attachments WHERE id = $1
+DELETE FROM note_attachments
+WHERE note_id = $1 AND attachment_index = $2
 `
 
-func (q *Queries) DeleteAttachment(ctx context.Context, id string) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteAttachment, id)
+type DeleteAttachmentParams struct {
+	NoteID          string `json:"note_id"`
+	AttachmentIndex int32  `json:"attachment_index"`
+}
+
+func (q *Queries) DeleteAttachment(ctx context.Context, arg DeleteAttachmentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAttachment, arg.NoteID, arg.AttachmentIndex)
 	if err != nil {
 		return 0, err
 	}
@@ -84,16 +90,22 @@ func (q *Queries) DeleteAttachmentsByNote(ctx context.Context, noteID string) er
 	return err
 }
 
-const getAttachmentByID = `-- name: GetAttachmentByID :one
-SELECT id, note_id, r2_key, url, content_type, file_size, kind, encrypted, created_at FROM note_attachments WHERE id = $1
+const getAttachmentByNoteAndIndex = `-- name: GetAttachmentByNoteAndIndex :one
+SELECT note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted, created_at FROM note_attachments
+WHERE note_id = $1 AND attachment_index = $2
 `
 
-func (q *Queries) GetAttachmentByID(ctx context.Context, id string) (NoteAttachment, error) {
-	row := q.db.QueryRow(ctx, getAttachmentByID, id)
+type GetAttachmentByNoteAndIndexParams struct {
+	NoteID          string `json:"note_id"`
+	AttachmentIndex int32  `json:"attachment_index"`
+}
+
+func (q *Queries) GetAttachmentByNoteAndIndex(ctx context.Context, arg GetAttachmentByNoteAndIndexParams) (NoteAttachment, error) {
+	row := q.db.QueryRow(ctx, getAttachmentByNoteAndIndex, arg.NoteID, arg.AttachmentIndex)
 	var i NoteAttachment
 	err := row.Scan(
-		&i.ID,
 		&i.NoteID,
+		&i.AttachmentIndex,
 		&i.R2Key,
 		&i.Url,
 		&i.ContentType,
@@ -105,8 +117,23 @@ func (q *Queries) GetAttachmentByID(ctx context.Context, id string) (NoteAttachm
 	return i, err
 }
 
+const getNextAttachmentIndex = `-- name: GetNextAttachmentIndex :one
+SELECT COALESCE(MAX(attachment_index), 0) + 1
+FROM note_attachments
+WHERE note_id = $1
+`
+
+func (q *Queries) GetNextAttachmentIndex(ctx context.Context, noteID string) (int32, error) {
+	row := q.db.QueryRow(ctx, getNextAttachmentIndex, noteID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const listAttachmentsByNote = `-- name: ListAttachmentsByNote :many
-SELECT id, note_id, r2_key, url, content_type, file_size, kind, encrypted, created_at FROM note_attachments WHERE note_id = $1 ORDER BY created_at ASC
+SELECT note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted, created_at FROM note_attachments
+WHERE note_id = $1
+ORDER BY attachment_index ASC
 `
 
 func (q *Queries) ListAttachmentsByNote(ctx context.Context, noteID string) ([]NoteAttachment, error) {
@@ -119,8 +146,8 @@ func (q *Queries) ListAttachmentsByNote(ctx context.Context, noteID string) ([]N
 	for rows.Next() {
 		var i NoteAttachment
 		if err := rows.Scan(
-			&i.ID,
 			&i.NoteID,
+			&i.AttachmentIndex,
 			&i.R2Key,
 			&i.Url,
 			&i.ContentType,
