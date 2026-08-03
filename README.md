@@ -1,3 +1,6 @@
+Berikut pembaruan `README.md` yang disesuaikan dengan kode sumber terbaru (terutama penambahan fitur **view-only** dengan `edit_password`, koreksi path attachment, dan beberapa detail lainnya):
+
+```markdown
 # Notepad Sharelink
 
 MVP notepad yang bisa dibagikan lewat link, dengan dua mode:
@@ -11,6 +14,7 @@ Fitur tambahan:
 
 - **Attachment** — lampiran gambar/video ke note. Note public pakai presigned URL langsung ke [Cloudflare R2](https://www.cloudflare.com/products/r2/); note private di-enkripsi server-side (AES-256-GCM, key sama dengan content note) sebelum diupload.
 - **ID sequential**: ID note/attachment dibuat dari counter global (base62, 5 karakter), bukan random.
+- **View-only dengan edit password** — note bisa di-set agar hanya bisa dilihat (view-only), dan untuk mengedit atau menghapusnya diperlukan password terpisah (`edit_password`). Fitur ini independen dari mode public/private.
 
 ## Stack
 
@@ -100,6 +104,7 @@ Semua endpoint di bawah prefix `/api/notes` bersifat **publik** — tidak ada lo
 ### Create note
 
 ```bash
+# Mode public
 curl -X POST localhost:8080/api/notes \
   -H "Content-Type: application/json" \
   -d '{"mode":"public","title":"Catatan pertama","content":"Halo dunia"}'
@@ -108,11 +113,24 @@ curl -X POST localhost:8080/api/notes \
 curl -X POST localhost:8080/api/notes \
   -H "Content-Type: application/json" \
   -d '{"mode":"private","title":"Rahasia","content":"Rahasia banget","password":"secret123"}'
+
+# Mode public + view-only (hanya bisa dilihat, edit/hapus butuh edit_password)
+curl -X POST localhost:8080/api/notes \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"public","title":"Pengumuman","content":"Teks pengumuman","is_view_only":true,"edit_password":"admin123"}'
 ```
+
+Parameter body:
+- `mode` (wajib) — `"public"` atau `"private"`
+- `title` (opsional, default `"Catatan tanpa judul"`, maks 200 karakter)
+- `content` (opsional, string konten)
+- `password` (wajib untuk mode private, minimal 4 karakter)
+- `is_view_only` (opsional, default `false`) — jika `true`, note hanya bisa dilihat, untuk edit/hapus butuh `edit_password`
+- `edit_password` (wajib jika `is_view_only: true`, minimal 4 karakter) — password terpisah untuk otorisasi update/delete
 
 Response:
 ```json
-{"id":"aB3xQ","share_url":"/n/aB3xQ","mode":"public","title":"Catatan tanpa judul"}
+{"id":"aB3xQ","share_url":"aB3xQ","mode":"public","title":"Catatan tanpa judul"}
 ```
 
 ### Get note (share link)
@@ -142,7 +160,15 @@ curl -X PUT localhost:8080/api/notes/aB3xQ \
   -d '{"title":"Judul baru","content":"Isi baru","password":"secret123"}'
 ```
 
-`password` wajib diisi untuk note mode private (diverifikasi dulu dengan mencoba dekripsi content lama).
+- Untuk note private: `password` wajib (diverifikasi dengan mencoba dekripsi konten lama).
+- Untuk note view-only (baik public maupun private): jika `is_view_only: true`, maka harus menyertakan `edit_password` yang benar. `password` tetap diperlukan untuk mode private (verifikasi enkripsi), sementara `edit_password` untuk otorisasi edit.
+
+Contoh update note public view-only:
+```bash
+curl -X PUT localhost:8080/api/notes/aB3xQ \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Judul baru","content":"Isi baru","edit_password":"admin123"}'
+```
 
 ### Delete note
 
@@ -152,6 +178,9 @@ curl -X DELETE localhost:8080/api/notes/aB3xQ \
   -d '{"password":"secret123"}'
 ```
 
+- Untuk note private: `password` wajib.
+- Untuk note view-only: harus menyertakan `edit_password` yang benar (jika mode public dan view-only, hanya `edit_password`; jika mode private dan view-only, perlu keduanya: `password` + `edit_password`).
+
 Menghapus note beserta seluruh attachment-nya.
 
 ## Attachment (lampiran file)
@@ -160,12 +189,13 @@ Endpoint attachment di prefix `/api/notes`, semua **publik**:
 
 | Method | Path | Deskripsi |
 |---|---|---|
-| GET | `/:id/attachments` | Daftar attachment note |
 | POST | `/:id/attachments/presign` | Presigned URL upload (note public) |
 | POST | `/:id/attachments/confirm` | Konfirmasi upload selesai (note public) |
 | POST | `/:id/attachments/private` | Upload attachment private (multipart, terenkripsi) |
-| POST | `/attachments/:attachmentId/download` | Download attachment private (butuh password) |
-| DELETE | `/attachments/:attachmentId` | Hapus attachment |
+| POST | `/:id/attachments/:index/download` | Download attachment private (butuh password) |
+| DELETE | `/:id/attachments/:index` | Hapus attachment |
+
+> **Catatan**: Daftar attachment suatu note otomatis disertakan dalam response `GET /api/notes/:id` (field `attachments`), tidak ada endpoint list terpisah.
 
 ### Flow Public (presigned URL)
 
@@ -192,11 +222,14 @@ curl -X POST localhost:8080/api/notes/<noteId>/attachments/private \
   -F "kind=image" \
   -F "password=secret123"
 
-# Download (publik — siapapun dengan password)
-curl -X POST localhost:8080/api/notes/attachments/<attachmentId>/download \
+# Download (publik — siapapun dengan password note)
+curl -X POST localhost:8080/api/notes/<noteId>/attachments/1/download \
   -H "Content-Type: application/json" \
   -d '{"password":"secret123"}' \
   --output foto.jpg
+
+# Hapus attachment index 1
+curl -X DELETE localhost:8080/api/notes/<noteId>/attachments/1
 ```
 
 ## Environment Variables
@@ -217,20 +250,23 @@ Lihat `.env.example` untuk daftar lengkap.
 | `PRESIGN_TTL_MINUTES` | ❌ | Default `10` |
 | `PORT` | ❌ | Default `8080` |
 | `APP_ENV` | ❌ | Isi `production` untuk JSON logging & CORS allowlist |
+| `ALLOWED_ORIGINS` | ❌ | Daftar origin yang diizinkan (pisahkan dengan koma) untuk CORS di production. Development mengizinkan semua origin. |
 
 > Kalau kredensial R2 (`R2_*`) tidak diisi, fitur attachment otomatis dinonaktifkan — note tetap berfungsi normal tanpa lampiran.
 
 ## Catatan desain & keamanan
 
 - **Tidak ada akun/login**: ID note (share link) + password (untuk mode private) adalah satu-satunya kontrol akses. Siapapun yang memegangnya bisa lihat, ubah, atau hapus note — tidak ada validasi kepemilikan.
+- **View-only dengan `edit_password`**: Note bisa di-set `is_view_only: true`. Untuk mengedit atau menghapusnya, diperlukan `edit_password` yang benar (diverifikasi dengan bcrypt). Ini berlaku untuk note public maupun private.
 - **Verifikasi password note private** dilakukan dengan mencoba dekripsi konten pakai AES-GCM. Kalau password salah, authentication tag gagal → dianggap password salah.
 - **Salt & key derivation (private note)**: tiap note private punya salt unik (16 byte), key diturunkan pakai Argon2id.
 - **ID sequential**: dihasilkan dari counter global (tabel `id_counter`) yang di-encode ke base62 5 karakter — bukan random seperti sebelumnya.
 - **Attachment private**: dienkripsi server-side (AES-256-GCM) dengan key yang sama dengan content note. Metadata tetap terbuka via List.
 - **Validasi file**: magic bytes via `http.DetectContentType`, ukuran via R2 HeadObject.
-- **Rate limiting**: create note & unlock note dilindungi rate limiter per IP (masing-masing 5/menit & 20/menit).
+- **Rate limiting**: create note (5/menit) & unlock note (20/menit) dilindungi rate limiter per IP.
 - **Structured logging**: `log/slog` (JSON di production, text di development).
 - **Graceful shutdown**: server menunggu request selesai (timeout 10 detik).
-- **CORS**: development allow all; production allowlist terbatas.
+- **CORS**: development allow all; production allowlist terbatas (via `ALLOWED_ORIGINS`).
 - **404 handler**: return JSON.
 - **Ini MVP/prototype**: belum ada TTL/auto-expire note, dan karena tidak ada akun, siapapun yang tahu ID note bisa mengubah/menghapusnya (mode public) — pertimbangkan ini sebelum dipakai untuk data sensitif dalam skala besar.
+```
