@@ -6,6 +6,8 @@ package sqlc
 
 import (
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type IDCounter struct {
@@ -22,15 +24,20 @@ type Note struct {
 	// plaintext for public, nonce||ciphertext for private
 	Content []byte `json:"content"`
 	// 16 byte random salt for private mode, empty for public
-	Salt      []byte    `json:"salt"`
-	Title     string    `json:"title"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Salt  []byte `json:"salt"`
+	Title string `json:"title"`
+	// true jika note diproteksi password untuk akses edit/delete
+	IsViewOnly bool `json:"is_view_only"`
+	// Hash password (bcrypt/argon2) untuk otorisasi pengeditan
+	EditPasswordHash pgtype.Text `json:"edit_password_hash"`
+	CreatedAt        time.Time   `json:"created_at"`
+	UpdatedAt        time.Time   `json:"updated_at"`
 }
 
 type NoteAttachment struct {
+	ID     string `json:"id"`
 	NoteID string `json:"note_id"`
-	// Index sequential per note, dimulai dari 1
+	// Index sequential per note, dimulai dari 1 (lihat GetNextAttachmentIndex)
 	AttachmentIndex int32 `json:"attachment_index"`
 	// key object di R2. Untuk attachment private, isinya adalah nonce||ciphertext AES-GCM (application/octet-stream)
 	R2Key       string `json:"r2_key"`

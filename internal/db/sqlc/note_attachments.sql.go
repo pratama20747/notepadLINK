@@ -23,7 +23,7 @@ func (q *Queries) CountAttachmentsByNote(ctx context.Context, noteID string) (in
 const createAttachment = `-- name: CreateAttachment :one
 INSERT INTO note_attachments (note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted, created_at
+RETURNING id, note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted, created_at
 `
 
 type CreateAttachmentParams struct {
@@ -50,6 +50,7 @@ func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentPara
 	)
 	var i NoteAttachment
 	err := row.Scan(
+		&i.ID,
 		&i.NoteID,
 		&i.AttachmentIndex,
 		&i.R2Key,
@@ -91,7 +92,7 @@ func (q *Queries) DeleteAttachmentsByNote(ctx context.Context, noteID string) er
 }
 
 const getAttachmentByNoteAndIndex = `-- name: GetAttachmentByNoteAndIndex :one
-SELECT note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted, created_at FROM note_attachments
+SELECT id, note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted, created_at FROM note_attachments
 WHERE note_id = $1 AND attachment_index = $2
 `
 
@@ -104,6 +105,7 @@ func (q *Queries) GetAttachmentByNoteAndIndex(ctx context.Context, arg GetAttach
 	row := q.db.QueryRow(ctx, getAttachmentByNoteAndIndex, arg.NoteID, arg.AttachmentIndex)
 	var i NoteAttachment
 	err := row.Scan(
+		&i.ID,
 		&i.NoteID,
 		&i.AttachmentIndex,
 		&i.R2Key,
@@ -131,7 +133,7 @@ func (q *Queries) GetNextAttachmentIndex(ctx context.Context, noteID string) (in
 }
 
 const listAttachmentsByNote = `-- name: ListAttachmentsByNote :many
-SELECT note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted, created_at FROM note_attachments
+SELECT id, note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted, created_at FROM note_attachments
 WHERE note_id = $1
 ORDER BY attachment_index ASC
 `
@@ -146,6 +148,7 @@ func (q *Queries) ListAttachmentsByNote(ctx context.Context, noteID string) ([]N
 	for rows.Next() {
 		var i NoteAttachment
 		if err := rows.Scan(
+			&i.ID,
 			&i.NoteID,
 			&i.AttachmentIndex,
 			&i.R2Key,

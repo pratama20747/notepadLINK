@@ -25,10 +25,12 @@ func NewNoteHandler(svc *service.NoteService) *NoteHandler {
 }
 
 type createNoteRequest struct {
-	Mode     string `json:"mode" binding:"required,oneof=public private"`
-	Title    string `json:"title"`
-	Content  string `json:"content"`
-	Password string `json:"password"`
+	Mode         string `json:"mode" binding:"required,oneof=public private"`
+	Title        string `json:"title"`
+	Content      string `json:"content"`
+	Password     string `json:"password"`
+	IsViewOnly   bool   `json:"is_view_only"`
+	EditPassword string `json:"edit_password"`
 }
 
 type createNoteResponse struct {
@@ -60,6 +62,11 @@ func (h *NoteHandler) Create(c *gin.Context) {
 		return
 	}
 
+	if req.IsViewOnly && len(req.EditPassword) < 4 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "edit_password minimal 4 karakter untuk mode view-only"})
+		return
+	}
+
 	if len(req.Title) > 200 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "judul terlalu panjang, maksimal 200 karakter"})
 		return
@@ -70,7 +77,7 @@ func (h *NoteHandler) Create(c *gin.Context) {
 		title = "Catatan tanpa judul"
 	}
 
-	id, err := h.svc.CreateNote(ctx, req.Mode, title, req.Content, req.Password)
+	id, err := h.svc.CreateNote(ctx, req.Mode, title, req.Content, req.Password, req.IsViewOnly, req.EditPassword)
 	if err != nil {
 		respondError(c, err)
 		return
@@ -145,9 +152,10 @@ func (h *NoteHandler) Unlock(c *gin.Context) {
 }
 
 type updateNoteRequest struct {
-	Title    string `json:"title"`
-	Content  string `json:"content"`
-	Password string `json:"password"`
+	Title        string `json:"title"`
+	Content      string `json:"content"`
+	Password     string `json:"password"`
+	EditPassword string `json:"edit_password"`
 }
 
 // Update menangani PUT /api/notes/:id.
@@ -171,7 +179,7 @@ func (h *NoteHandler) Update(c *gin.Context) {
 		title = "Catatan tanpa judul"
 	}
 
-	if err := h.svc.UpdateNote(ctx, id, title, req.Content, req.Password); err != nil {
+	if err := h.svc.UpdateNote(ctx, id, title, req.Content, req.Password, req.EditPassword); err != nil {
 		respondError(c, err)
 		return
 	}
@@ -180,7 +188,8 @@ func (h *NoteHandler) Update(c *gin.Context) {
 }
 
 type deleteNoteRequest struct {
-	Password string `json:"password"`
+	Password     string `json:"password"`
+	EditPassword string `json:"edit_password"`
 }
 
 // Delete menangani DELETE /api/notes/:id.
@@ -198,7 +207,7 @@ func (h *NoteHandler) Delete(c *gin.Context) {
 	// (mis. body kosong pada request DELETE tanpa password).
 	_ = c.ShouldBindJSON(&req)
 
-	if err := h.svc.DeleteNote(ctx, id, req.Password); err != nil {
+	if err := h.svc.DeleteNote(ctx, id, req.Password, req.EditPassword); err != nil {
 		respondError(c, err)
 		return
 	}
@@ -221,6 +230,10 @@ func respondError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "mode tidak valid"})
 	case errors.Is(err, service.ErrTitleTooLong):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "judul terlalu panjang, maksimal 200 karakter"})
+	case errors.Is(err, service.ErrEditPasswordNeeded):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "edit_password wajib diisi untuk note view-only"})
+	case errors.Is(err, service.ErrWrongEditPassword):
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "edit_password salah"})
 	default:
 		log.Printf("internal error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})

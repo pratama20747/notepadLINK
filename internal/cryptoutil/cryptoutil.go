@@ -1,5 +1,5 @@
 // Package cryptoutil menyediakan fungsi untuk menurunkan encryption key dari
-// password (Argon2id) serta enkripsi/dekripsi konten (AES-256-GCM).
+// Argon2/ password (Argon2id) serta enkripsi/dekripsi konten (AES-256-GCM).
 //
 // Catatan desain: kita tidak menyimpan hash password secara terpisah.
 // Verifikasi password dilakukan dengan cara mencoba men-decrypt konten yang
@@ -16,6 +16,7 @@ import (
 	"io"
 
 	"golang.org/x/crypto/argon2"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -93,4 +94,26 @@ func Decrypt(data []byte, key []byte) ([]byte, error) {
 	}
 
 	return plaintext, nil
+}
+
+// ErrWrongEditPassword dikembalikan ketika edit_password tidak cocok dengan hash.
+var ErrWrongEditPassword = errors.New("edit_password salah")
+
+// HashEditPassword menghasilkan bcrypt hash dari edit_password (dipakai untuk
+// fitur view-only: password ini HANYA mengotorisasi update/delete, bukan
+// untuk enkripsi apapun — jadi cukup bcrypt, tidak perlu Argon2id+AES).
+func HashEditPassword(password string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+// VerifyEditPassword membandingkan edit_password dengan hash yang tersimpan.
+func VerifyEditPassword(password, hash string) error {
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
+		return ErrWrongEditPassword
+	}
+	return nil
 }

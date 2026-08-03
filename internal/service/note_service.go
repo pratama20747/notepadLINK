@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"notepad-sharelink/internal/cryptoutil"
 	"notepad-sharelink/internal/db/sqlc"
@@ -22,11 +23,13 @@ const (
 
 // Sentinel errors — di-map ke HTTP status code yang sesuai di handler layer.
 var (
-	ErrNotFound       = errors.New("note tidak ditemukan")
-	ErrWrongPassword  = errors.New("password salah")
-	ErrInvalidMode    = errors.New("mode tidak valid")
-	ErrPasswordNeeded = errors.New("password wajib diisi untuk note mode private")
-	ErrTitleTooLong   = errors.New("judul terlalu panjang, maksimal 200 karakter")
+	ErrNotFound           = errors.New("note tidak ditemukan")
+	ErrWrongPassword      = errors.New("password salah")
+	ErrInvalidMode        = errors.New("mode tidak valid")
+	ErrPasswordNeeded     = errors.New("password wajib diisi untuk note mode private")
+	ErrTitleTooLong       = errors.New("judul terlalu panjang, maksimal 200 karakter")
+	ErrEditPasswordNeeded = errors.New("edit_password wajib diisi untuk note view-only")
+	ErrWrongEditPassword  = cryptoutil.ErrWrongEditPassword
 )
 
 // NoteSummary digunakan untuk response list notes ringan — tanpa content/salt.
@@ -60,19 +63,18 @@ func (s *NoteService) nextID(ctx context.Context) (string, error) {
 	return idgen.Encode(counter), nil
 }
 
-// CreateNote membuat note baru dan mengembalikan ID (slug) untuk share link.
-//
-// Title selalu disimpan sebagai plaintext (TEXT) agar judul private note tetap
-// terlihat di daftar catatan dan saat share link.
-// Content: plaintext untuk public, dienkripsi (AES-256-GCM) untuk private.
-func (s *NoteService) CreateNote(ctx context.Context, mode, title, content, password string) (string, error) {
+// CreateNote membuat note baru. isViewOnly + editPassword bersifat opsional
+// dan independen dari mode (public/private): kalau isViewOnly true, editPassword
+// wajib diisi dan di-hash pakai bcrypt, lalu disimpan di edit_password_hash.
+// editPassword ini HANYA mengotorisasi update/delete — tidak dipakai untuk
+// enkripsi apapun (beda dengan `password` mode private).
+func (s *NoteService) CreateNote(ctx context.Context, mode, title, content, password string, isViewOnly bool, editPassword string) (string, error) {
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
 	if mode != ModePublic && mode != ModePrivate {
 		return "", ErrInvalidMode
 	}
-
 	if len(title) > 200 {
 		return "", ErrTitleTooLong
 	}
@@ -96,12 +98,10 @@ func (s *NoteService) CreateNote(ctx context.Context, mode, title, content, pass
 		if password == "" {
 			return "", ErrPasswordNeeded
 		}
-
 		salt, err = cryptoutil.GenerateSalt()
 		if err != nil {
 			return "", err
 		}
-
 		key := cryptoutil.DeriveKey(password, salt)
 		storedContent, err = cryptoutil.Encrypt([]byte(content), key)
 		if err != nil {
@@ -109,12 +109,26 @@ func (s *NoteService) CreateNote(ctx context.Context, mode, title, content, pass
 		}
 	}
 
+	var editHash pgtype.Text
+	if isViewOnly {
+		if editPassword == "" {
+			return "", ErrEditPasswordNeeded
+		}
+		h, err := cryptoutil.HashEditPassword(editPassword)
+		if err != nil {
+			return "", err
+		}
+		editHash = pgtype.Text{String: h, Valid: true}
+	}
+
 	_, err = s.q.CreateNote(ctx, sqlc.CreateNoteParams{
-		ID:      id,
-		Mode:    mode,
-		Content: storedContent,
-		Salt:    salt,
-		Title:   title,
+		ID:               id,
+		Mode:             mode,
+		Content:          storedContent,
+		Salt:             salt,
+		Title:            title,
+		IsViewOnly:       isViewOnly,
+		EditPasswordHash: editHash,
 	})
 	if err != nil {
 		return "", err
@@ -188,14 +202,10 @@ func (s *NoteService) UnlockPrivateNote(ctx context.Context, id, password string
 	return n.Title, string(plaintextContent), attachments, nil
 }
 
-// UpdateNote mengubah isi note (content & title). Untuk mode private, password
-// wajib dikirim dan akan diverifikasi terlebih dahulu (dengan mencoba dekripsi
-// content lama) sebelum content baru dienkripsi ulang dan disimpan.
-func (s *NoteService) UpdateNote(ctx context.Context, id, title, content, password string) error {
+func (s *NoteService) UpdateNote(ctx context.Context, id, title, content, password, editPassword string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-
 	if len(title) > 200 {
 		return ErrTitleTooLong
 	}
@@ -208,6 +218,18 @@ func (s *NoteService) UpdateNote(ctx context.Context, id, title, content, passwo
 		return err
 	}
 
+	if n.IsViewOnly {
+		if editPassword == "" {
+			return ErrEditPasswordNeeded
+		}
+		if !n.EditPasswordHash.Valid {
+			return ErrWrongEditPassword // seharusnya tidak terjadi, tapi jaga-jaga
+		}
+		if err := cryptoutil.VerifyEditPassword(editPassword, n.EditPasswordHash.String); err != nil {
+			return err
+		}
+	}
+
 	var newContent []byte
 
 	switch n.Mode {
@@ -218,14 +240,10 @@ func (s *NoteService) UpdateNote(ctx context.Context, id, title, content, passwo
 		if password == "" {
 			return ErrPasswordNeeded
 		}
-
 		key := cryptoutil.DeriveKey(password, n.Salt)
-
-		// Verifikasi password: coba dekripsi content lama dulu.
 		if _, err := cryptoutil.Decrypt(n.Content, key); err != nil {
 			return ErrWrongPassword
 		}
-
 		newContent, err = cryptoutil.Encrypt([]byte(content), key)
 		if err != nil {
 			return err
@@ -240,10 +258,7 @@ func (s *NoteService) UpdateNote(ctx context.Context, id, title, content, passwo
 	return err
 }
 
-// DeleteNote menghapus note beserta seluruh attachment-nya. Untuk mode
-// private, password wajib diverifikasi terlebih dahulu sebelum penghapusan
-// dieksekusi.
-func (s *NoteService) DeleteNote(ctx context.Context, id, password string) error {
+func (s *NoteService) DeleteNote(ctx context.Context, id, password, editPassword string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -256,11 +271,22 @@ func (s *NoteService) DeleteNote(ctx context.Context, id, password string) error
 		return err
 	}
 
+	if n.IsViewOnly {
+		if editPassword == "" {
+			return ErrEditPasswordNeeded
+		}
+		if !n.EditPasswordHash.Valid {
+			return ErrWrongEditPassword
+		}
+		if err := cryptoutil.VerifyEditPassword(editPassword, n.EditPasswordHash.String); err != nil {
+			return err
+		}
+	}
+
 	if n.Mode == ModePrivate {
 		if password == "" {
 			return ErrPasswordNeeded
 		}
-
 		key := cryptoutil.DeriveKey(password, n.Salt)
 		if _, err := cryptoutil.Decrypt(n.Content, key); err != nil {
 			return ErrWrongPassword

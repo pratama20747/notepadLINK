@@ -7,6 +7,8 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countNotes = `-- name: CountNotes :one
@@ -21,17 +23,19 @@ func (q *Queries) CountNotes(ctx context.Context) (int64, error) {
 }
 
 const createNote = `-- name: CreateNote :one
-INSERT INTO notes (id, mode, content, salt, title)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, mode, content, salt, title, created_at, updated_at
+INSERT INTO notes (id, mode, content, salt, title, is_view_only, edit_password_hash)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, mode, content, salt, title, is_view_only, edit_password_hash, created_at, updated_at
 `
 
 type CreateNoteParams struct {
-	ID      string `json:"id"`
-	Mode    string `json:"mode"`
-	Content []byte `json:"content"`
-	Salt    []byte `json:"salt"`
-	Title   string `json:"title"`
+	ID               string      `json:"id"`
+	Mode             string      `json:"mode"`
+	Content          []byte      `json:"content"`
+	Salt             []byte      `json:"salt"`
+	Title            string      `json:"title"`
+	IsViewOnly       bool        `json:"is_view_only"`
+	EditPasswordHash pgtype.Text `json:"edit_password_hash"`
 }
 
 func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, error) {
@@ -41,6 +45,8 @@ func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, e
 		arg.Content,
 		arg.Salt,
 		arg.Title,
+		arg.IsViewOnly,
+		arg.EditPasswordHash,
 	)
 	var i Note
 	err := row.Scan(
@@ -49,6 +55,8 @@ func (q *Queries) CreateNote(ctx context.Context, arg CreateNoteParams) (Note, e
 		&i.Content,
 		&i.Salt,
 		&i.Title,
+		&i.IsViewOnly,
+		&i.EditPasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -68,7 +76,7 @@ func (q *Queries) DeleteNote(ctx context.Context, id string) (int64, error) {
 }
 
 const getNote = `-- name: GetNote :one
-SELECT id, mode, content, salt, title, created_at, updated_at FROM notes WHERE id = $1
+SELECT id, mode, content, salt, title, is_view_only, edit_password_hash, created_at, updated_at FROM notes WHERE id = $1
 `
 
 func (q *Queries) GetNote(ctx context.Context, id string) (Note, error) {
@@ -80,6 +88,8 @@ func (q *Queries) GetNote(ctx context.Context, id string) (Note, error) {
 		&i.Content,
 		&i.Salt,
 		&i.Title,
+		&i.IsViewOnly,
+		&i.EditPasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -90,7 +100,7 @@ const updateNoteContent = `-- name: UpdateNoteContent :one
 UPDATE notes
 SET content = $2, title = $3, updated_at = now()
 WHERE id = $1
-RETURNING id, mode, content, salt, title, created_at, updated_at
+RETURNING id, mode, content, salt, title, is_view_only, edit_password_hash, created_at, updated_at
 `
 
 type UpdateNoteContentParams struct {
@@ -108,6 +118,8 @@ func (q *Queries) UpdateNoteContent(ctx context.Context, arg UpdateNoteContentPa
 		&i.Content,
 		&i.Salt,
 		&i.Title,
+		&i.IsViewOnly,
+		&i.EditPasswordHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

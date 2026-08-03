@@ -1,6 +1,6 @@
 -- name: CreateNote :one
-INSERT INTO notes (id, mode, content, salt, title)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO notes (id, mode, content, salt, title, is_view_only, edit_password_hash)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: GetNote :one
