@@ -106,13 +106,19 @@ func (h *NoteHandler) Get(c *gin.Context) {
 		return
 	}
 
-	mode, title, content, attachments, err := h.svc.GetNoteMeta(ctx, id)
+	mode, title, content, isViewOnly, attachments, err := h.svc.GetNoteMeta(ctx, id)
 	if err != nil {
 		respondError(c, err)
 		return
 	}
 
-	resp := gin.H{"id": id, "mode": mode, "title": title, "attachments": attachments}
+	resp := gin.H{
+		"id":           id,
+		"mode":         mode,
+		"title":        title,
+		"is_view_only": isViewOnly,
+		"attachments":  attachments,
+	}
 	if mode == service.ModePublic {
 		resp["content"] = content
 	} else {

@@ -138,32 +138,33 @@ func (s *NoteService) CreateNote(ctx context.Context, mode, title, content, pass
 }
 
 // GetNoteMeta mengembalikan mode note, title, content (HANYA jika mode-nya
-// public), dan daftar attachment. Untuk mode private, content tidak
-// dikembalikan — klien harus memanggil UnlockPrivateNote dengan password yang
-// benar. Title & attachments selalu dikembalikan untuk semua mode.
+// public), status is_view_only, dan daftar attachment. Untuk mode private,
+// content tidak dikembalikan — klien harus memanggil UnlockPrivateNote dengan
+// password yang benar. Title, is_view_only & attachments selalu dikembalikan
+// untuk semua mode.
 //
 // Endpoint ini PUBLIK — tidak butuh login. Siapapun bisa akses lewat share link.
-func (s *NoteService) GetNoteMeta(ctx context.Context, id string) (mode string, title string, content string, attachments []sqlc.NoteAttachment, err error) {
+func (s *NoteService) GetNoteMeta(ctx context.Context, id string) (mode string, title string, content string, isViewOnly bool, attachments []sqlc.NoteAttachment, err error) {
 	if ctx.Err() != nil {
-		return "", "", "", nil, ctx.Err()
+		return "", "", "", false, nil, ctx.Err()
 	}
 	n, err := s.q.GetNote(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", "", "", nil, ErrNotFound
+			return "", "", "", false, nil, ErrNotFound
 		}
-		return "", "", "", nil, err
+		return "", "", "", false, nil, err
 	}
 
 	attachments, err = s.q.ListAttachmentsByNote(ctx, id)
 	if err != nil {
-		return "", "", "", nil, err
+		return "", "", "", false, nil, err
 	}
 
 	if n.Mode == ModePublic {
-		return n.Mode, n.Title, string(n.Content), attachments, nil
+		return n.Mode, n.Title, string(n.Content), n.IsViewOnly, attachments, nil
 	}
-	return n.Mode, n.Title, "", attachments, nil
+	return n.Mode, n.Title, "", n.IsViewOnly, attachments, nil
 }
 
 // UnlockPrivateNote memverifikasi password dan mengembalikan title, content
