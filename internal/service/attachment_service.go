@@ -156,8 +156,13 @@ func (s *AttachmentService) ConfirmUpload(ctx context.Context, noteID, key, kind
 	if err != nil {
 		return sqlc.NoteAttachment{}, err
 	}
+	attID, err := storage.RandomHex(16)
+	if err != nil {
+		return sqlc.NoteAttachment{}, err
+	}
 
 	return s.q.CreateAttachment(ctx, sqlc.CreateAttachmentParams{
+		ID:              attID,
 		NoteID:          noteID,
 		AttachmentIndex: index,
 		R2Key:           key,
@@ -229,7 +234,13 @@ func (s *AttachmentService) UploadPrivate(ctx context.Context, noteID, password,
 		return sqlc.NoteAttachment{}, err
 	}
 
+	attID, err := storage.RandomHex(16)
+	if err != nil {
+		return sqlc.NoteAttachment{}, err
+	}
+
 	return s.q.CreateAttachment(ctx, sqlc.CreateAttachmentParams{
+		ID:              attID,
 		NoteID:          noteID,
 		AttachmentIndex: index,
 		R2Key:           r2Key,

@@ -40,24 +40,21 @@ COMMENT ON COLUMN notes.salt IS '16 byte random salt for private mode, empty for
 COMMENT ON COLUMN notes.is_view_only IS 'true jika note diproteksi password untuk akses edit/delete';
 COMMENT ON COLUMN notes.edit_password_hash IS 'Hash password (bcrypt/argon2) untuk otorisasi pengeditan';
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- ============================================================
 -- TABEL note_attachments
 -- ============================================================
 CREATE TABLE IF NOT EXISTS note_attachments (
-    id                VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    id                VARCHAR(32) PRIMARY KEY,   -- di-generate di kode (hex 16 byte), bukan DB
     note_id           VARCHAR(21) NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-    attachment_index  INT NOT NULL,                        -- Index sequential per note, dimulai dari 1
+    attachment_index  INT NOT NULL,
     r2_key            TEXT NOT NULL,
     url               TEXT NOT NULL,
-    content_type      TEXT NOT NULL,                         -- Diubah ke TEXT agar lebih fleksibel
+    content_type      TEXT NOT NULL,
     file_size         BIGINT NOT NULL,
     kind              VARCHAR(10) NOT NULL CHECK (kind IN ('image', 'video')),
     encrypted         BOOLEAN NOT NULL DEFAULT false,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    -- Composite key ini yang dipakai di semua query (GetAttachmentByNoteAndIndex,
-    -- DeleteAttachment, dst) — jadi harus unik per note.
     CONSTRAINT uq_note_attachments_note_index UNIQUE (note_id, attachment_index)
 );
 

@@ -4,8 +4,8 @@ FROM note_attachments
 WHERE note_id = $1;
 
 -- name: CreateAttachment :one
-INSERT INTO note_attachments (note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO note_attachments (id, note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: GetAttachmentByNoteAndIndex :one

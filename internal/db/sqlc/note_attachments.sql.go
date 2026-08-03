@@ -21,12 +21,13 @@ func (q *Queries) CountAttachmentsByNote(ctx context.Context, noteID string) (in
 }
 
 const createAttachment = `-- name: CreateAttachment :one
-INSERT INTO note_attachments (note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO note_attachments (id, note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING id, note_id, attachment_index, r2_key, url, content_type, file_size, kind, encrypted, created_at
 `
 
 type CreateAttachmentParams struct {
+	ID              string `json:"id"`
 	NoteID          string `json:"note_id"`
 	AttachmentIndex int32  `json:"attachment_index"`
 	R2Key           string `json:"r2_key"`
@@ -39,6 +40,7 @@ type CreateAttachmentParams struct {
 
 func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentParams) (NoteAttachment, error) {
 	row := q.db.QueryRow(ctx, createAttachment,
+		arg.ID,
 		arg.NoteID,
 		arg.AttachmentIndex,
 		arg.R2Key,
